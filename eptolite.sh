@@ -94,7 +94,7 @@
 #     
 #   In the comments below, that describe ouput or effect,
 #   syntax stands for the full syntax, the file is a.txt,
-#   \n is used to indicate linebreak.
+#   words is usr/share/dict/words, \n is used to indicate linebreak.
 #
 #   
 #     msg      			    # outputs nothing
@@ -110,6 +110,9 @@
 #     grexist blah $file	    # no output. exit 0 if match, else not 0 
 #     assert grexist blah $file     # exit != 0 --> die "Assertion failed: $@"
 #     isint $i  		    # 34 -9 returns 0. 23f a &7 returns not 0.
+#     pipe cat $words | head -1     # pipe handles SIGPIPE when head exits early
+#     setfailfast off               # turn off robust behaviour. 
+#     setfailfast on                # turn on robust behaviour (default)
 #     
 #   To reset current logfile to its original value, do "setlog /dev/fd/2".
 #  
@@ -124,7 +127,6 @@
 #   This copyright and this softwares license does not extend 
 #   to files that include, or otherwise use, this file. 
 #
-# LICENSE   
 #   MIT license
 #   
 #   Permission is hereby granted, free of charge, to any person obtaining
@@ -147,7 +149,6 @@
 #   THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 	
-set -eu
 
 ###################################
 ################################### Public eptolite functions.
@@ -204,6 +205,9 @@ topv       () { eval echo \"\${$1[@]: -1}\"; } # last element (highest index)
 popv       () { eval unset $1[\${#$1[@]}-1]; } # unset last element 
  
 datetime   () { date '+%Y-%m-%d: %H.%M.%S: %z'; }
+
+setfailfast() { local c=-;[ "X${1-}" = Xoff ]&&c=+;set ${c}eu ${c}o pipefail; }
+pipe       () { "$@"  || { local err=$?; [ $err -eq 141 ]  ||  return $err; }; }
 
 nostdopts  () { nostdopts_=true; }
 setsyntax  () { [ $# -eq 1 ] || funcdie "1 arg only";syntax_=$1;setopts_ "$1"; }
@@ -330,7 +334,7 @@ setopts_ ()
     opts_=$1
     
     
-    opts_=$(echo "$opts_" | perl -lpe 's/\-\-.*$//g') # del -- and beyond
+    opts_=$(echo "$opts_" | perl -lpe 's/\-\-.*$//g') # delete '--' and beyond
 
     
     opts_=$(echo "$opts_" | perl -lpe 's/^[^[]*//')   # del progname
@@ -345,6 +349,7 @@ setopts_ ()
     opts_=$(echo "$opts_" | perl -lpe 's/\s|\[|\]|\-//g') # del spc [ ] -
 }
 
+setfailfast
 
 nostdopts_=
 progname_=`basename $0`
