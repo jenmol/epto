@@ -4,7 +4,7 @@
 #   eptolite - a small bash library for robust and maintainable scripts
 #
 # SYNTAX
-#   . /usr/lib/eptolite.sh
+#   . /usr/lib/eptolite.sh  || exit 1
 #
 # DESCRIPTION
 #   eptolite is a small framework and library for developing industrial strength
@@ -46,7 +46,7 @@
 #   Here we go:
 #
 #
-#     . /usr/lib/epto
+#     . /usr/lib/eptolite.sh  ||  exit 1
 #     
 #     setsyntax "[-aDgvVX] [-A logfile] [-E errorlevel] [-F logfile] file"
 #     setversion 1.0          # or leave this out if not relevant
@@ -162,13 +162,31 @@ die        () { errmsg "$@"; exit 1; }
 funcdie    () { die "${FUNCNAME[1]}: $@"; }  # only use in your functions
 syndie     () { errmsg "$@"; echo "$syntax_"; exit 2; }
 msgdie     () { msg "$@"; exit 0; }
+argnumdie  () { syndie "Wrong number of arguments: Expected $1, got $2"; }
+rangedie   () { syndie "Wrong number of arguments: Expected $1 to $2, got $3"; }
+
 assert     () { "$@"  ||  die "Assertion failed:" "$@"; }
 
-isint      () { echo "$1" | grep -P '^\s*-?[0-9]+\s*$' >& /dev/null; } 
+isint      () { [ $# -eq 0 ] && return 0; isint_ "$1" && { shift;isint "$@"; } }
 incr       () { local n_=1; [ $# -eq 2 ] && n_=$2; eval $1=$(($1 + n_)); }
 decr       () { local n_=1; [ $# -eq 2 ] && n_=$2; eval $1=$(($1 - n_)); }
+numeq      () { [ $# -eq 2 ] && isint "$@" && [ $1 -eq $2 ]; }
+numinrange () { [ $# -eq 3 ] && isint "$@" && [ $1 -le $3 ] && [ $3 -le $2 ]; }
 
 grexist    () { grep "$@" >/dev/null 2>&1; }
+
+logfile    () { assert [ $# -eq 0 ]; echo $logfile_; }
+setlog     () 
+{ 
+    logfile_=$1
+    touch $logfile_    || funcdie "$logfile_ untouchable"
+    [ -w "$logfile_" ] || funcdie "$logfile_ unwriteable" 
+    >$logfile_; 
+    :; 
+}
+
+
+appendlog  () { logfile_=$1; }
 
 logmsg     () { msg "$@" >>$logfile_; }
 vlogmsg    () { [ $verbose ] && log "$@"; :; }
@@ -188,10 +206,6 @@ vvtracecmd () { [ $veryverbose ] && tracecmd "$@"; :; }
 
 multilog   () { msg "$@"; logmsg "$@"; }
 
-logfile    () { assert [ $# -eq 0 ]; echo $logfile_; }
-setlog     () { logfile_=$1;[ -f "$logfile_" ] && >$logfile_; :; }
-appendlog  () { logfile_=$1; }
-
 first      () { nth 0 "$@"; }
 rest       () { [ $# -eq 0 ] && return 0; shift; echo ${@+"$@"}; }
 nth        () { [ $# -le "$1" ] && return 0; shift $1; shift; echo $1; } 
@@ -207,10 +221,11 @@ popv       () { eval unset $1[\${#$1[@]}-1]; } # unset last element
 datetime   () { date '+%Y-%m-%d: %H.%M.%S: %z'; }
 
 setfailfast() { local c=-;[ "X${1-}" = Xoff ]&&c=+;set ${c}eu ${c}o pipefail; }
+setpipefail() { local c=-;[ "X${1-}" = Xoff ]&&c=+;set ${c}o pipefail; }
 pipe       () { "$@"  || { local err=$?; [ $err -eq 141 ]  ||  return $err; }; }
 
 nostdopts  () { nostdopts_=true; }
-setsyntax  () { [ $# -eq 1 ] || funcdie "1 arg only";syntax_=$1;setopts_ "$1"; }
+setsyntax  () { syntax_+="$progname_ $@"; setopts_ "$@"; }
 setversion () { progversion_="$@"; }
 setoptions () { opts_=$1; }  # only need to use if setsyntax doesn't work (rare)
 
@@ -227,13 +242,14 @@ alias parse_and_shift_away_options='optparse_ ${opts_}$stdopts_ "$@" &&
 ###################################  know what you're doing).
 ###################################
 
+isint_           () { echo "$1" | grexist -P '^\s*-?\d*\s*$'; } 
 
 
-init_opt_        () { eval opt_$1=; }
-init_optarg_     () { eval opt_$1_arg=; }
-init_optcount_   () { eval opt_$1_count=0; }
-init_optarg_all_ () { eval opt_$1_all=; }
-init_optarg_argv_() { eval declare -ga opt_$1_argv=; }
+init_opt_        () { eval opt_${1}=; }
+init_optarg_     () { eval opt_${1}_arg=; }
+init_optcount_   () { eval opt_${1}_count=0; }
+init_optarg_all_ () { eval opt_${1}_all=; }
+init_optarg_argv_() { eval declare -ga opt_${1}_argv=; }
 
 
 optparse_ ()   # example:  optparse "abcd:e:qz" "$@"
@@ -311,7 +327,7 @@ handle_standard_options_ ()
     verbose=
     veryverbose=
 
-    [ $opt_v ] && { msgdie  "Version: $progversion"; }
+    [ $opt_v ] && { msgdie  "Version: $progversion_"; }
 
     [ $opt_D ]             && set -x
     [ $opt_D_count -ge 2 ] && set -v
@@ -329,7 +345,7 @@ handle_standard_options_ ()
 
 setopts_ () 
 {
-    echo "$1" | grexist grep -P '^\s*\['  &&  syntax_="$progname_ $1"
+    #echo "$1" | grexist grep -P '^\s*\['  &&  syntax_="$progname_ $1"
     [ -n "$opts_" ]  &&  return 0;
     opts_=$1
     
@@ -350,10 +366,13 @@ setopts_ ()
 }
 
 setfailfast
+setpipefail off
 
 nostdopts_=
-progname_=`basename $0`
-progversion_=${progversion:-"N/A"}
+progname_=$(basename $0)
+progversion_="N/A"
+
+syntax_=$progname_
 
 logfile_=/dev/fd/1
 
